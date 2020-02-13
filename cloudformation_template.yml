@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+    TopicsESAutoscaling:
+        Type: AWS::SNS::Topic
+        Properties: 
+            DisplayName: String
+            Subscription:
+               - Endpoint: !GetAtt LambdaESAutoscaling.Arn
+                 Protocol: "lambda"
+            TopicName: "sns-topic-es-autoscaling"  
+
+    RoleLambdaESAutoscaling:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Principal:
+                    Service:
+                      - "lambda.amazonaws.com"
+                  Action:
+                    - sts:AssumeRole
+            Path: "/"
+            ManagedPolicyArns:
+              - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+            RoleName: "iam-role-Lambda-ESAutoscaling"
+            Tags:
+              - Key: Name
+                Value: "iam-role-Lambda-ESAutoscaling"  
+
+    RolePolicyESAutoscaling:
+        Type: AWS::IAM::Policy
+        Properties:
+            PolicyName: 'iam-policy-Lambda-ESAutoscaling'
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action: 
+                  - 'es:UpdateElasticsearchDomainConfig'
+                  - 'es:DescribeElasticsearchDomainConfig'
+                Resource: "*"
+            Roles:
+            - !Ref RoleLambdaESAutoscaling  
+
+    LambdaESAutoscaling:
+        Type: "AWS::Lambda::Function"
+        Properties:
+            Code:
+              ZipFile: |
+                import json
+                import boto3
+                import logging
+                
+                logger = logging.getLogger()
+                logger.setLevel(logging.INFO)
+                
+                def lambda_handler(event, context):
+                    try:
+                        messageData=json.loads(event['Records'][0]['Sns']['Message'])
+                        dimensionData=messageData['Trigger']['Dimensions']
+                        for dimension in dimensionData:
+                            if dimension['name']=='DomainName':
+                                clusterName=dimension['value']
+                        logger.info(clusterName)
+                        if clusterName is not None:
+                            client = boto3.client('es')
+                            response = client.describe_elasticsearch_domain_config(DomainName=clusterName)
+                            nodeCount = response['DomainConfig']['ElasticsearchClusterConfig']['Options']['InstanceCount']
+                            updateConfig = {'InstanceCount':int(nodeCount)+2}
+                            logger.info(updateConfig)
+                            updateResponse = client.update_elasticsearch_domain_config(DomainName=clusterName,ElasticsearchClusterConfig=updateConfig)
+                            logger.info(updateResponse)
+                    except:
+                        logging.exception('')
+                    return {
+                        'statusCode': 200,
+                        'body': 'Done'
+                    }
+            Description: "AWS Elasticseatch autoscaleing"
+            FunctionName: "Lambda-ES-autoscaling"
+            Handler: "index.lambda_handler"
+            MemorySize: 128
+            Role: !GetAtt RoleLambdaESAutoscaling.Arn
+            Runtime: "python3.7"
+            Timeout: 60  
+
