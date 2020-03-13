@@ -4,10 +4,14 @@ Resources:
         Type: AWS::SNS::Topic
         Properties: 
             DisplayName: String
-            Subscription:
-               - Endpoint: !GetAtt LambdaESAutoscaling.Arn
-                 Protocol: "lambda"
-            TopicName: "sns-topic-es-autoscaling"  
+
+    Subscription:
+        Type: AWS::SNS::Subscription 
+        Properties:
+            Endpoint: !GetAtt LambdaESAutoscaling.Arn
+            Protocol: "lambda"
+            TopicArn: !Ref 'TopicsESAutoscaling'
+        DependsOn: LambdaESAutoscaling 
 
     RoleLambdaESAutoscaling:
         Type: AWS::IAM::Role
@@ -41,6 +45,19 @@ Resources:
                   - 'es:UpdateElasticsearchDomainConfig'
                   - 'es:DescribeElasticsearchDomainConfig'
                 Resource: "*"
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - 'sns:Subscribe'
+                  - 'sns:Receive'
+                  - 'sns:Unsubscribe'
+                Resource: 
+                  - !Ref TopicsESAutoscaling 
             Roles:
             - !Ref RoleLambdaESAutoscaling  
 
@@ -85,4 +102,13 @@ Resources:
             Role: !GetAtt RoleLambdaESAutoscaling.Arn
             Runtime: "python3.7"
             Timeout: 60  
+
+    LambdaInvokePermission:
+        Type: 'AWS::Lambda::Permission'
+        Properties:
+            Action: 'lambda:InvokeFunction'
+            Principal: sns.amazonaws.com
+            FunctionName: !GetAtt LambdaESAutoscaling.Arn
+            SourceArn: !Ref TopicsESAutoscaling
+        DependsOn: LambdaESAutoscaling 
 
